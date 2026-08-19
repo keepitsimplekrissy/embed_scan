@@ -53,10 +53,8 @@ class PinStatusScannerUI(ScannerUI):
         sys.stdout.flush()
 
     def command_line_interface(self):
-        selection = self.read_cli_byte()
-        if isinstance(selection, int):
-            selection = chr(selection)
-        if selection in ("\n", "\r"):
+        selection = self.read_cli_command()
+        if not selection:
             return
 
         match selection:
@@ -79,4 +77,3 @@ class PinStatusScannerUI(ScannerUI):
         pin_spec = input_args.get("status_pins", "") or input_args.get("pins", "")
         if pin_spec:
             self.pins = self.parse_pin_spec(str(pin_spec))
-

@@ -11,6 +11,7 @@ class ScannerUI:
         self.run_loop = True
         self._prompt = prompt
         self._wait_hook = wait_hook
+        self._pending_line: str | None = None
 
     def _idle_wait(self):
         if self._wait_hook is not None:
@@ -30,6 +31,10 @@ class ScannerUI:
             self._idle_wait()
 
     def read_cli_line(self) -> str:
+        if self._pending_line is not None:
+            line = self._pending_line
+            self._pending_line = None
+            return line
         try:
             line = sys.stdin.buffer.readline()
         except Exception:
@@ -45,6 +50,17 @@ class ScannerUI:
             if text:
                 return text
         return text
+
+    def read_cli_command(self) -> str:
+        """Read a single command token from one input line."""
+        line = self.read_cli_line()
+        if not line:
+            return ""
+        if len(line) > 1:
+            remainder = line[1:].strip()
+            if remainder:
+                self._pending_line = remainder
+        return line[0]
 
     def read_cli_unsigned_int(self):
         buffer = ""
@@ -105,15 +121,7 @@ class ScannerUI:
     def read_cli_pin_list(self):
         text = ""
         for _ in range(2):
-            try:
-                line = sys.stdin.buffer.readline()
-            except Exception:
-                return []
-
-            if not line:
-                return []
-
-            text = line.decode("utf-8", errors="ignore").strip()
+            text = self.read_cli_line()
             if text:
                 break
         if not text:

@@ -126,10 +126,8 @@ class UartScannerUI(ScannerUI):
         sys.stdout.flush()
 
     def command_line_interface(self):
-        selection = self.read_cli_byte()
-        if isinstance(selection, int):
-            selection = chr(selection)
-        if selection in ("\n", "\r"):
+        selection = self.read_cli_command()
+        if not selection:
             return
 
         match selection:

@@ -61,3 +61,14 @@ def test_status_ui_scan_command(monkeypatch):
     assert "pin 1: high\n" in out
     assert "pin 2: low\n" in out
 
+
+def test_status_ui_command_with_enter_does_not_add_extra_prompt(monkeypatch):
+    sio = StdIOCapture(b"h\nq\n")
+    sio.apply(monkeypatch)
+    scanner = FakeStatusScanner()
+    ui = PinStatusScannerUI(scanner)
+
+    ui.loop()
+    ui.loop()
+
+    assert sio.get_stdout().count("> ") == 2

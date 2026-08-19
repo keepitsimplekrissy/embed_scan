@@ -124,3 +124,15 @@ def test_uart_ui_set_time_skips_leading_newline(monkeypatch):
 
     ui.command_line_interface()
     assert ui.capture_seconds == 2.5
+
+
+def test_uart_ui_command_with_enter_does_not_add_extra_prompt(monkeypatch):
+    sio = StdIOCapture(b"h\nq\n")
+    sio.apply(monkeypatch)
+    scanner = FakeUartScanner()
+    ui = UartScannerUI(scanner)
+
+    ui.loop()
+    ui.loop()
+
+    assert sio.get_stdout().count("> ") == 2

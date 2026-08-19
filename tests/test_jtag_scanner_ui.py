@@ -285,6 +285,18 @@ def test_command_line_interface_ignores_newline(monkeypatch):
     assert "Unknown command:" not in sio.get_stdout()
 
 
+def test_jtag_ui_command_with_enter_does_not_add_extra_prompt(monkeypatch):
+    sio = StdIOCapture(b"h\nq\n")
+    sio.apply(monkeypatch)
+    scanner = FakeScanner()
+    ui = JtagScannerUI(scanner)
+
+    ui.loop()
+    ui.loop()
+
+    assert sio.get_stdout().count(PROMPT) == 2
+
+
 def test_help_menu_displays_correctly(monkeypatch):
     """Send help display selection "h" -> should print help info."""
     sio = StdIOCapture(b"h")

@@ -266,10 +266,8 @@ class JtagScannerUI(ScannerUI):
 
     def command_line_interface(self):
         """Read one command from the CLI and execute the corresponding action."""
-        selection = self.read_cli_byte()
-        if isinstance(selection, int):
-            selection = chr(selection)
-        if selection in ("\n", "\r"):
+        selection = self.read_cli_command()
+        if not selection:
             return
 
         match selection:
