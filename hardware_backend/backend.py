@@ -1,6 +1,7 @@
 class HardwareBackend:
     def __init__(self):
         self.error = None
+        self.backend_name = ""
 
     def open_device(self, device_index=0):
         raise NotImplementedError

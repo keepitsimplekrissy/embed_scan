@@ -7,6 +7,7 @@ from . import saleae
 class SaleaeHardwareInterface(HardwareBackend):
     def __init__(self):
         super().__init__()
+        self.backend_name = "Saleae"
         self._saleae_device = None
         self._saleae_connected = False
 

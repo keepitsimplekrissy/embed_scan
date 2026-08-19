@@ -10,6 +10,7 @@ HIGH = 1
 class DwfHardwareInterface(HardwareBackend):
     def __init__(self):
         super().__init__()
+        self.backend_name = "DWF"
         self._dwf_device = None
         self._dwf_handle = None
         self._dwf_connected = False
