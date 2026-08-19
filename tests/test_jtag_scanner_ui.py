@@ -275,6 +275,16 @@ def test_command_line_interface_unknown_command(monkeypatch):
     assert "Unknown command: x\n" in out
 
 
+def test_command_line_interface_ignores_newline(monkeypatch):
+    sio = StdIOCapture(b"\n")
+    sio.apply(monkeypatch)
+    scanner = FakeScanner()
+    ui = JtagScannerUI(scanner)
+
+    ui.command_line_interface()
+    assert "Unknown command:" not in sio.get_stdout()
+
+
 def test_help_menu_displays_correctly(monkeypatch):
     """Send help display selection "h" -> should print help info."""
     sio = StdIOCapture(b"h")

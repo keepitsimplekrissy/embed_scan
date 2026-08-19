@@ -38,27 +38,22 @@ def test_main_program_closes_device_on_exit(monkeypatch):
         def close_runtime_device(self):
             self.closed = True
 
-    class FakeUI:
-        def __init__(self, scanner):
-            self.scanner = scanner
-            self.run_loop = True
-
-        def setup(self, _input_args):
-            return None
-
-        def display_help(self):
-            return None
-
-        def loop(self):
-            self.run_loop = False
+        def run_jtag_scan(self, **_kwargs):
+            return types.SimpleNamespace(ok=False, status="failed", reason="test", mapping=None)
 
     monkeypatch.setattr(
         embed_scan,
         "parse_arguments",
-        lambda _argv: types.SimpleNamespace(hardware_backend="dwf", device_index=0),
+        lambda _argv: types.SimpleNamespace(
+            hardware_backend="dwf",
+            device_index=0,
+            scanner_mode="jtag",
+            candidate_channels=None,
+            pin_mask_override=None,
+            pin_max_override=None,
+        ),
     )
     monkeypatch.setattr(embed_scan, "JtagScanner", FakeScanner)
-    monkeypatch.setattr(embed_scan, "JtagScannerUI", FakeUI)
 
     embed_scan.main_program()
 
@@ -78,13 +73,13 @@ def test_parse_arguments_supports_uart_subcommand():
     assert args.sample_rate == 8_000_000
 
 
-def test_parse_arguments_supports_uart_ui_subcommand():
+def test_parse_arguments_supports_ui_subcommand():
     args = embed_scan.parse_arguments(
-        ["dwf", "0", "uart-ui", "--pins", "0-3,5", "--seconds", "3", "--sample-rate", "4000000"]
+        ["dwf", "0", "ui", "--pins", "0-3,5", "--seconds", "3", "--sample-rate", "4000000"]
     )
     assert args.hardware_backend == "dwf"
     assert args.device_index == 0
-    assert args.scanner_mode == "uart-ui"
+    assert args.scanner_mode == "ui"
     assert args.pins == "0-3,5"
     assert args.seconds == 3.0
     assert args.sample_rate == 4_000_000
@@ -100,6 +95,14 @@ def test_parse_arguments_supports_jtag_subcommand():
     assert args.candidate_channels == "0-3,5"
     assert args.pin_mask_override == 0xFF
     assert args.pin_max_override == 8
+
+
+def test_parse_arguments_supports_status_subcommand():
+    args = embed_scan.parse_arguments(["dwf", "0", "status", "--pins", "1-3"])
+    assert args.hardware_backend == "dwf"
+    assert args.device_index == 0
+    assert args.scanner_mode == "status"
+    assert args.pins == "1-3"
 
 
 def test_main_program_uart_mode(monkeypatch):
@@ -151,22 +154,11 @@ def test_main_program_uart_mode(monkeypatch):
     assert call["baud_rates"] == (9600, 115200)
 
 
-def test_main_program_uart_ui_mode(monkeypatch):
-    class FakeUartUI:
-        created = None
+def test_main_program_ui_mode(monkeypatch):
+    called = {}
 
-        def __init__(self, _scanner):
-            FakeUartUI.created = self
-            self.run_loop = True
-
-        def setup(self, _input_args):
-            return None
-
-        def display_help(self):
-            return None
-
-        def loop(self):
-            self.run_loop = False
+    def fake_run_interactive_mode(_backend, _input_args):
+        called["ui"] = True
 
     monkeypatch.setattr(
         embed_scan,
@@ -174,17 +166,17 @@ def test_main_program_uart_ui_mode(monkeypatch):
         lambda _argv: types.SimpleNamespace(
             hardware_backend="dwf",
             device_index=0,
-            scanner_mode="uart-ui",
+            scanner_mode="ui",
             pins="2,3,5",
             seconds=1.5,
             sample_rate=8_000_000,
             baud_rates="9600,115200",
         ),
     )
-    monkeypatch.setattr(embed_scan, "UartScannerUI", FakeUartUI)
+    monkeypatch.setattr(embed_scan, "_run_interactive_mode", fake_run_interactive_mode)
 
     embed_scan.main_program()
-    assert FakeUartUI.created is not None
+    assert called.get("ui") is True
 
 
 def test_main_program_jtag_mode(monkeypatch):
@@ -227,3 +219,36 @@ def test_main_program_jtag_mode(monkeypatch):
     call = FakeJtagScanner.calls[0]
     assert call["device_index"] == 0
     assert call["candidate_channels"] == [2, 3, 4, 5]
+
+
+def test_main_program_status_mode(monkeypatch):
+    class FakeStatusReport:
+        status = "success"
+        reason = "ok"
+        pin_states = {1: "high", 2: "low"}
+
+    class FakeStatusScanner:
+        calls = []
+
+        def __init__(self, _backend):
+            pass
+
+        def read_pin_states(self, pins, device_index=0):
+            FakeStatusScanner.calls.append((pins, device_index))
+            return FakeStatusReport()
+
+    monkeypatch.setattr(
+        embed_scan,
+        "parse_arguments",
+        lambda _argv: types.SimpleNamespace(
+            hardware_backend="dwf",
+            device_index=0,
+            scanner_mode="status",
+            pins="1,2",
+        ),
+    )
+    monkeypatch.setattr(embed_scan, "PinStatusScanner", FakeStatusScanner)
+
+    embed_scan.main_program()
+
+    assert FakeStatusScanner.calls == [([1, 2], 0)]

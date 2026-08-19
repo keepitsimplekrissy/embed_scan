@@ -10,7 +10,7 @@ from hardware_backend import DwfHardwareInterface, HardwareBackend
 LOW = 0
 HIGH = 1
 
-PIN_MASK = 0b11111100
+PIN_MASK = 0b11111111
 PIN_NOT_USED = 0xff
 
 IR_LEN_MIN = 2

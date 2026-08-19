@@ -4,9 +4,10 @@ import logging
 from typing import Any
 
 from .jtag_scanner import JtagScanner, PROMPT, ROW_FORMAT, ROW_FORMAT_TDI
+from ..scanner_ui import ScannerUI
 
 
-class JtagScannerUI:
+class JtagScannerUI(ScannerUI):
     """Command-line user interface for driving a JtagScanner instance.
 
     The UI reads from sys.stdin and writes to sys.stdout by default, and it
@@ -22,106 +23,7 @@ class JtagScannerUI:
         """
         self.scanner: JtagScanner = scanner
         self.scanner.output = self
-        self.run_loop = True
-
-    def read_cli_byte(self):
-        """Read a single byte from stdin.buffer.
-
-        Returns the integer byte value read. If stdin is not readable the
-        scanner.delay method is invoked to avoid busy-waiting.
-        """
-        while True:
-            if sys.stdin is not None and not sys.stdin.closed:
-                try:
-                    input_value = sys.stdin.buffer.read(1)
-                    if input_value:
-                        return input_value[0]
-                except Exception:
-                    pass
-            self.scanner.delay(100)
-
-    def read_cli_unsigned_int(self):
-        """Read text bytes from stdin until newline and parse an unsigned int.
-
-        Accepts decimal or prefixed (0x) formats via int(..., 0). Limits input to
-        a modest length to avoid excessive buffering. Returns 0 when no digits
-        were entered.
-        """
-        buffer = ""
-        idx = 0
-
-        while True:
-            if sys.stdin is not None and not sys.stdin.closed:
-                try:
-                    input_value = sys.stdin.buffer.read(1)
-                    if input_value:
-                        byte = input_value[0]
-                        sys.stdout.write(chr(byte if 0x20 <= byte <= 0x7e else 0x20))
-                        sys.stdout.flush()
-                        if idx < 20 - 1 and byte not in (0x0d, 0x0a):
-                            if 0x30 <= byte <= 0x7a:
-                                buffer = buffer + chr(byte)
-                                idx += 1
-                        else:
-                            sys.stdout.write("\n")
-                            sys.stdout.flush()
-                            return int(buffer, 0) if buffer else 0
-                except Exception:
-                    pass
-            self.scanner.delay(100)
-
-    def read_cli_pin_list(self):
-        """Read pin indices and ranges from stdin.
-
-        Accepts comma/space separated integers and dash-separated ranges like
-        "0-7" or mixed input such as "0-3, 6, 8-10". Returns non-negative pins
-        in the entered order (ranges are expanded inclusively).
-        """
-        text = ""
-        for _ in range(2):
-            try:
-                line = sys.stdin.buffer.readline()
-            except Exception:
-                return []
-
-            if not line:
-                return []
-
-            text = line.decode("utf-8", errors="ignore").strip()
-            if text:
-                break
-        if not text:
-            return []
-
-        pins: list[int] = []
-        for token in text.replace(",", " ").split():
-            if "-" in token:
-                parts = token.split("-")
-                if len(parts) != 2:
-                    continue
-                try:
-                    start = int(parts[0])
-                    end = int(parts[1])
-                except (TypeError, ValueError):
-                    continue
-                if start < 0 or end < 0:
-                    continue
-                step = 1 if end >= start else -1
-                pins.extend(range(start, end + step, step))
-                continue
-
-            try:
-                value = int(token)
-            except (TypeError, ValueError):
-                continue
-            if value >= 0:
-                pins.append(value)
-        return pins
-
-    def print_prompt(self):
-        """Write the command prompt to stdout."""
-        sys.stdout.write(PROMPT)
-        sys.stdout.flush()
+        super().__init__(prompt=PROMPT, wait_hook=lambda: self.scanner.delay(100))
 
     def id_code_banner(self):
         """Print the header line used before IDCODE output rows."""
@@ -367,6 +269,8 @@ class JtagScannerUI:
         selection = self.read_cli_byte()
         if isinstance(selection, int):
             selection = chr(selection)
+        if selection in ("\n", "\r"):
+            return
 
         match selection:
 
@@ -416,10 +320,5 @@ class JtagScannerUI:
         self.scanner.set_log_level(logging.INFO)
 
     def loop(self):
-        """Single iteration of the interactive UI loop.
-
-        Prints a prompt and processes one entered command via
-        command_line_interface.
-        """
-        self.print_prompt()
-        self.command_line_interface()
+        """Single iteration of the interactive UI loop."""
+        super().loop()
