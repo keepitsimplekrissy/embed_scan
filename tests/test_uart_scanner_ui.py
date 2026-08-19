@@ -96,6 +96,31 @@ def test_uart_ui_scan_command(monkeypatch):
     assert call["baud_rates"] == (9600, 115200)
 
     out = sio.get_stdout()
+    assert "Starting UART scan with settings:\n" in out
+    assert "device index: 0\n" in out
+    assert "pins: [2, 3, 5]\n" in out
+    assert "capture seconds: 1.5\n" in out
+    assert "sample rate hz: 8000000\n" in out
+    assert "baud rates: [9600, 115200]\n" in out
     assert "UART scan status: success\n" in out
     assert "rx pin: 3\n" in out
 
+
+def test_uart_ui_ignores_newline_command(monkeypatch):
+    sio = StdIOCapture(b"\n")
+    sio.apply(monkeypatch)
+    scanner = FakeUartScanner()
+    ui = UartScannerUI(scanner)
+
+    ui.command_line_interface()
+    assert "Unknown command:" not in sio.get_stdout()
+
+
+def test_uart_ui_set_time_skips_leading_newline(monkeypatch):
+    sio = StdIOCapture(b"t\n2.5\n")
+    sio.apply(monkeypatch)
+    scanner = FakeUartScanner()
+    ui = UartScannerUI(scanner)
+
+    ui.command_line_interface()
+    assert ui.capture_seconds == 2.5

@@ -1,3 +1,5 @@
+import time
+
 from hardware_backend import HardwareBackend
 from features.uart import UartScanner
 
@@ -45,6 +47,46 @@ class DummyCaptureBackend(HardwareBackend):
     def capture_digital_samples(self, pins, sample_rate_hz, duration_seconds):
         self.log.append(("capture", tuple(pins), sample_rate_hz, duration_seconds))
         return {pin: self.capture_data[pin] for pin in pins}
+
+
+class DummyNoCaptureBackend(HardwareBackend):
+    def __init__(self):
+        super().__init__()
+        self.log = []
+
+    def open_device(self, device_index=0):
+        self.log.append(("open_device", device_index))
+        return self
+
+    def close_device(self):
+        self.log.append("close_device")
+
+    def runtime_ready(self):
+        return True
+
+    def get_channel_indices(self, pin_mask, pin_max, pin_mask_override=None, pin_max_override=None):
+        return [1]
+
+    def resolve_device(self, device_or_index):
+        return self
+
+    def get_channel(self, pin):
+        return None
+
+    def configure_device(self):
+        return True
+
+    def ensure_initialized(self):
+        return True
+
+    def digital_write(self, pin, value):
+        return value
+
+    def digital_read(self, pin):
+        return 1
+
+    def pin_mode(self, pin, mode):
+        return True
 
 
 def _build_uart_line_samples(
@@ -104,3 +146,16 @@ def test_analyze_capture_detects_uart_and_flow_control_pin():
     assert report.flow_control_pin == 5
     assert report.decoded_bytes == b"Hi"
 
+
+def test_capture_pins_fallback_is_time_bounded():
+    backend = DummyNoCaptureBackend()
+    scanner = UartScanner(backend)
+    start_time = time.perf_counter()
+    captured = scanner.capture_pins([1], duration_seconds=0.01, sample_rate_hz=8_000_000)
+    elapsed = time.perf_counter() - start_time
+
+    assert elapsed < 1.0
+    assert 1 in captured
+    assert len(captured[1]) > 0
+    assert len(captured[1]) <= 250_000
+    assert "close_device" in backend.log

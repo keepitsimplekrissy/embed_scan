@@ -26,6 +26,9 @@ COMMON_UART_BAUD_RATES: tuple[int, ...] = (
     4000000,
 )
 
+FALLBACK_MAX_SAMPLES = 250_000
+MAX_ANALYSIS_SAMPLES = 250_000
+
 
 @dataclass
 class UartAnalysisReport:
@@ -86,17 +89,30 @@ class UartScanner:
         duration_seconds: float,
         sample_rate_hz: int,
     ) -> dict[int, list[int]]:
-        total_samples = max(1, int(duration_seconds * sample_rate_hz))
         pin_samples: dict[int, list[int]] = {pin: [] for pin in pins}
 
         start_time = time.perf_counter()
-        for sample_idx in range(total_samples):
-            target_time = start_time + ((sample_idx + 1) / sample_rate_hz)
+        end_time = start_time + duration_seconds
+        sample_period = 1.0 / float(sample_rate_hz)
+        next_sample_time = start_time
+        samples_taken = 0
+
+        while True:
+            now = time.perf_counter()
+            if now >= end_time or samples_taken >= FALLBACK_MAX_SAMPLES:
+                break
+            if now < next_sample_time:
+                continue
             for pin in pins:
                 level = self.backend.digital_read(pin)
                 pin_samples[pin].append(1 if level else 0)
-            while time.perf_counter() < target_time:
-                pass
+            next_sample_time += sample_period
+            samples_taken += 1
+
+        if not pin_samples[pins[0]]:
+            for pin in pins:
+                level = self.backend.digital_read(pin)
+                pin_samples[pin].append(1 if level else 0)
 
         return pin_samples
 
@@ -137,6 +153,16 @@ class UartScanner:
                 decoded_text="",
                 reason="no pin samples were provided",
             )
+
+        decimation_step = 1
+        first_samples = next(iter(pin_samples.values()))
+        if len(first_samples) > MAX_ANALYSIS_SAMPLES:
+            decimation_step = max(1, int(math.ceil(len(first_samples) / MAX_ANALYSIS_SAMPLES)))
+            pin_samples = {
+                pin: samples[::decimation_step]
+                for pin, samples in pin_samples.items()
+            }
+            sample_rate_hz = max(1, int(round(sample_rate_hz / decimation_step)))
 
         best_result = None
         frame_configs = (

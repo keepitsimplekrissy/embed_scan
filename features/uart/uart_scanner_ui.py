@@ -1,57 +1,22 @@
 import sys
-import time
 
 from typing import Any
 
 from .uart_scanner import COMMON_UART_BAUD_RATES, UartScanner
+from ..scanner_ui import ScannerUI
 
-PROMPT = "> "
 
-
-class UartScannerUI:
+class UartScannerUI(ScannerUI):
     """Interactive command-line UI for running UART capture and analysis."""
 
     def __init__(self, scanner: UartScanner):
         self.scanner = scanner
-        self.run_loop = True
+        super().__init__()
         self.device_index = 0
         self.pins: list[int] = []
         self.capture_seconds = 1.0
         self.sample_rate_hz = 8_000_000
         self.baud_rates = list(COMMON_UART_BAUD_RATES)
-
-    @staticmethod
-    def parse_pin_spec(pin_spec: str) -> list[int]:
-        pins: list[int] = []
-        for token in pin_spec.replace(",", " ").split():
-            if "-" in token:
-                parts = token.split("-")
-                if len(parts) != 2:
-                    continue
-                try:
-                    start = int(parts[0])
-                    end = int(parts[1])
-                except (TypeError, ValueError):
-                    continue
-                if start < 0 or end < 0:
-                    continue
-                step = 1 if end >= start else -1
-                pins.extend(range(start, end + step, step))
-                continue
-            try:
-                pin = int(token)
-            except (TypeError, ValueError):
-                continue
-            if pin >= 0:
-                pins.append(pin)
-
-        deduped: list[int] = []
-        seen = set()
-        for pin in pins:
-            if pin not in seen:
-                seen.add(pin)
-                deduped.append(pin)
-        return deduped
 
     @staticmethod
     def parse_baud_rates(baud_rates_spec: str) -> list[int]:
@@ -65,34 +30,10 @@ class UartScannerUI:
                 parsed.append(value)
         return parsed
 
-    def read_cli_byte(self):
-        while True:
-            if sys.stdin is not None and not sys.stdin.closed:
-                try:
-                    input_value = sys.stdin.buffer.read(1)
-                    if input_value:
-                        return input_value[0]
-                except Exception:
-                    pass
-            time.sleep(0.1)
-
-    def read_cli_line(self) -> str:
-        try:
-            line = sys.stdin.buffer.readline()
-        except Exception:
-            return ""
-        if not line:
-            return ""
-        return line.decode("utf-8", errors="ignore").strip()
-
-    def print_prompt(self):
-        sys.stdout.write(PROMPT)
-        sys.stdout.flush()
-
     def set_pins(self):
         sys.stdout.write("Enter UART candidate pins (comma list or range): ")
         sys.stdout.flush()
-        pins = self.parse_pin_spec(self.read_cli_line())
+        pins = self.read_cli_pin_list()
         if pins:
             self.pins = pins
             sys.stdout.write("UART pins set to " + str(self.pins) + "\n")
@@ -103,7 +44,7 @@ class UartScannerUI:
     def set_capture_seconds(self):
         sys.stdout.write("Enter UART capture duration in seconds: ")
         sys.stdout.flush()
-        value = self.read_cli_line()
+        value = self.read_cli_nonempty_line()
         try:
             parsed = float(value)
             if parsed > 0:
@@ -116,7 +57,7 @@ class UartScannerUI:
     def set_sample_rate(self):
         sys.stdout.write("Enter UART sample rate in Hz: ")
         sys.stdout.flush()
-        value = self.read_cli_line()
+        value = self.read_cli_nonempty_line()
         try:
             parsed = int(value)
             if parsed > 0:
@@ -129,7 +70,7 @@ class UartScannerUI:
     def set_baud_rates(self):
         sys.stdout.write("Enter baud rates (comma separated): ")
         sys.stdout.flush()
-        parsed = self.parse_baud_rates(self.read_cli_line())
+        parsed = self.parse_baud_rates(self.read_cli_nonempty_line())
         if parsed:
             self.baud_rates = parsed
         sys.stdout.write("Baud rates set to " + str(self.baud_rates) + "\n")
@@ -140,6 +81,14 @@ class UartScannerUI:
             sys.stdout.write("No UART pins selected. Use 'p' to set pins first.\n")
             sys.stdout.flush()
             return
+
+        sys.stdout.write("Starting UART scan with settings:\n")
+        sys.stdout.write("device index: " + str(self.device_index) + "\n")
+        sys.stdout.write("pins: " + str(self.pins) + "\n")
+        sys.stdout.write("capture seconds: " + str(self.capture_seconds) + "\n")
+        sys.stdout.write("sample rate hz: " + str(self.sample_rate_hz) + "\n")
+        sys.stdout.write("baud rates: " + str(self.baud_rates) + "\n")
+        sys.stdout.flush()
 
         report = self.scanner.capture_and_analyze(
             pins=self.pins,
@@ -180,6 +129,8 @@ class UartScannerUI:
         selection = self.read_cli_byte()
         if isinstance(selection, int):
             selection = chr(selection)
+        if selection in ("\n", "\r"):
+            return
 
         match selection:
             case "s":
@@ -227,6 +178,4 @@ class UartScannerUI:
             self.baud_rates = parsed_baud_rates
 
     def loop(self):
-        self.print_prompt()
-        self.command_line_interface()
-
+        super().loop()
