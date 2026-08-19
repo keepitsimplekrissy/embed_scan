@@ -9,8 +9,8 @@ import logging
 import argparse
 import sys
 
-from jtag_scanner import JtagScanner
-from jtag_scanner_ui import JtagScannerUI
+from features.jtag.jtag_scanner import JtagScanner
+from features.jtag.jtag_scanner_ui import JtagScannerUI
 from hardware_backend import DwfHardwareInterface
 
 logging.basicConfig(
@@ -28,9 +28,9 @@ def run_jtag_scan(*args, **kwargs):
     return DEFAULT_SCANNER.run_jtag_scan(*args, **kwargs)
 
 
-def scan_dwf_jtag_pins(*args, **kwargs):
-    """Module-level compatibility wrapper for scanner.scan_dwf_jtag_pins()."""
-    return DEFAULT_SCANNER.scan_dwf_jtag_pins(*args, **kwargs)
+def scan_jtag_pins(*args, **kwargs):
+    """Module-level wrapper for scanner.scan_jtag_pins()."""
+    return DEFAULT_SCANNER.scan_jtag_pins(*args, **kwargs)
 
 
 def parse_arguments(input_arguments):
@@ -50,28 +50,35 @@ def parse_arguments(input_arguments):
 
 def main_program():
     """Main program entry point."""
-    # argument parser
-    input_args = sys.argv[1:]
-    args = parse_arguments(input_args)
-    input_args = vars(args)
+    scanner = None
+    try:
+        # argument parser
+        input_args = sys.argv[1:]
+        args = parse_arguments(input_args)
+        input_args = vars(args)
 
-    #
-    if input_args["hardware_backend"] == "dwf":
-        from hardware_backend.dwf import DwfHardwareInterface as HardwareBackend
-    elif input_args["hardware_backend"] == "saleae":
-        from hardware_backend.saleae import SaleaeHardwareInterface as HardwareBackend
-    else:
-        raise ValueError(f"Unsupported hardware backend: {input_args.hardware_backend}")
-    hardware_backend = HardwareBackend()
-    scanner = JtagScanner(hardware_backend)
-
-    #
-    ui = JtagScannerUI(scanner)
-    ui.setup(input_args)
-    ui.display_help()
-    while ui.run_loop:
-        ui.loop()
+        #
+        if input_args["hardware_backend"] == "dwf":
+            from hardware_backend.dwf import DwfHardwareInterface as HardwareBackend
+        elif input_args["hardware_backend"] == "saleae":
+            from hardware_backend.saleae import SaleaeHardwareInterface as HardwareBackend
+        else:
+            raise ValueError(f"Unsupported hardware backend: {input_args.hardware_backend}")
+        hardware_backend = HardwareBackend()
+        
+        # Jtag
+        scanner = JtagScanner(hardware_backend)
+        ui = JtagScannerUI(scanner)
+        
+        ui.setup(input_args)
+        ui.display_help()
+        while ui.run_loop:
+            ui.loop()
+    finally:
+        if scanner is not None:
+            scanner.close_runtime_device()
 
 
 if __name__ == "__main__":
     main_program()
+

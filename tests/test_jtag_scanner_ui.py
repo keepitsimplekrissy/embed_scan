@@ -5,8 +5,8 @@ import types
 
 import pytest
 
-from jtag_scanner_ui import JtagScannerUI
-from jtag_scanner import PROMPT, ROW_FORMAT, ROW_FORMAT_TDI
+from features.jtag.jtag_scanner_ui import JtagScannerUI
+from features.jtag.jtag_scanner import PROMPT, ROW_FORMAT, ROW_FORMAT_TDI
 
 
 class FakeLogger:

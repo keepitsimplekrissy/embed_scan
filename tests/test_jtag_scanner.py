@@ -1,6 +1,6 @@
 import pytest
 
-from jtag_scanner import JtagScanner
+from features.jtag.jtag_scanner import JtagScanner
 
 
 def test_bit_read_basic():

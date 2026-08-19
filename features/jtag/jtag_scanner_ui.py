@@ -3,7 +3,7 @@ import logging
 
 from typing import Any
 
-from jtag_scanner import JtagScanner, PROMPT, ROW_FORMAT, ROW_FORMAT_TDI
+from .jtag_scanner import JtagScanner, PROMPT, ROW_FORMAT, ROW_FORMAT_TDI
 
 
 class JtagScannerUI:

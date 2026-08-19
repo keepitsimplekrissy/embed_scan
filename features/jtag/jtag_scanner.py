@@ -55,7 +55,7 @@ class JtagScanResult:
 class JtagScanner:
     """Core JTAG scanning logic and hardware abstraction.
 
-    This class coordinates access to a hardware backend (DWF by default) to
+    This class coordinates access to a hardware backend to
     discover which digital I/O channels correspond to JTAG signals (TCK, TMS,
     TDO, and optionally TDI). The scanner provides both simulation helpers and
     hardware-driven scan flows.
@@ -73,7 +73,7 @@ class JtagScanner:
         """Initialize a JtagScanner.
 
         Args:
-            pin_mask: Bitmask indicating which DWF channels are usable.
+            pin_mask: Bitmask indicating which backend channels are usable.
             pin_max: Maximum number of pins (channels) to consider.
             clock_half_cycle_us: Clock half-cycle in microseconds used for timing.
             bypass_pattern: Known bypass pattern used to detect TDI/TDO when
@@ -98,6 +98,8 @@ class JtagScanner:
 
         self._soft_pin_mode: dict[int, object] = {}
         self._soft_pin_level: dict[int, bool] = {}
+        self._runtime_device = None
+        self._runtime_connected = False
 
         self.backend = backend or DwfHardwareInterface()
         self.logger = logging.getLogger(__name__)
@@ -280,19 +282,19 @@ class JtagScanner:
 
         return None
 
-    def open_dwf_device(self, device_index=0):
-        """Open a DWF device by index via the configured backend.
+    def open_runtime_device(self, device_index=0):
+        """Open a runtime device by index via the configured backend.
 
         Returns a device object or None on failure.
         """
         return self.backend.open_device(device_index)
 
-    def close_dwf_device(self):
-        """Close the previously opened DWF device via the backend."""
+    def close_runtime_device(self):
+        """Close the previously opened runtime device via the backend."""
         return self.backend.close_device()
 
-    def get_dwf_channel_indices(self, pin_mask_override=None, pin_max_override=None):
-        """Return a list of available DWF channel indices from the backend.
+    def get_runtime_channel_indices(self, pin_mask_override=None, pin_max_override=None):
+        """Return a list of available channel indices from the active backend.
 
         Accepts optional overrides for pin_mask and pin_max.
         """
@@ -303,8 +305,8 @@ class JtagScanner:
             pin_max_override=pin_max_override,
         )
 
-    def dwf_runtime_ready(self):
-        """Query the backend to determine whether the hardware runtime is ready."""
+    def runtime_ready(self):
+        """Query the backend to determine whether the runtime is ready."""
         return self.backend.runtime_ready()
 
     def _coerce_candidate_list(self, candidate_channels):
@@ -327,8 +329,8 @@ class JtagScanner:
         """
         return self.backend.resolve_device(device_or_index)
 
-    def scan_dwf_jtag_pins(self, device_index=0, candidate_channels=None, pin_mask_override=None, pin_max_override=None, runtime_policy="hardware"):
-        """Convenience wrapper: scan DWF-attached device for JTAG pins.
+    def scan_jtag_pins(self, device_index=0, candidate_channels=None, pin_mask_override=None, pin_max_override=None, runtime_policy="hardware"):
+        """Convenience wrapper: scan a backend-attached device for JTAG pins.
 
         Delegates to run_jtag_scan() preserving a similar API surface.
         """
@@ -343,7 +345,7 @@ class JtagScanner:
     def run_jtag_scan(self, device_index=0, candidate_channels=None, pin_mask_override=None, pin_max_override=None, runtime_policy="hardware", device=None):
         """Run a full JTAG scan using either hardware or simulation.
 
-        Parameters mirror the public API: device_index chooses a DWF device by
+        Parameters mirror the public API: device_index chooses a backend device by
         index, candidate_channels may be provided to avoid querying hardware
         channel lists, and runtime_policy selects between 'hardware' and
         'simulation'. When a device object is provided it is validated and used
@@ -361,7 +363,7 @@ class JtagScanner:
                     status="failed",
                     mapping=None,
                     channels=[],
-                    reason="caller supplied a device object that was not acceptable to dwfpy",
+                    reason="caller supplied a device object that was not accepted by the backend",
                 )
 
         if candidate_channels is not None:
@@ -399,12 +401,12 @@ class JtagScanner:
                     status="failed",
                     mapping=None,
                     channels=[],
-                    reason="caller device object is not acceptable to dwfpy",
+                    reason="caller device object was not accepted by the backend",
                 )
 
-            self._dwf_device = device
-            self._dwf_connected = getattr(device, "is_open", False)
-            if not self._dwf_connected:
+            self._runtime_device = device
+            self._runtime_connected = getattr(device, "is_open", False)
+            if not self._runtime_connected:
                 return JtagScanResult(
                     ok=False,
                     status="failed",
@@ -414,41 +416,41 @@ class JtagScanner:
                 )
 
             try:
-                channels = self.get_dwf_channel_indices(
+                channels = self.get_runtime_channel_indices(
                     pin_mask_override=pin_mask_override,
                     pin_max_override=pin_max_override,
                 )
             finally:
-                self._dwf_device = None
-                self._dwf_connected = False
+                self._runtime_device = None
+                self._runtime_connected = False
         else:
-            device = self.open_dwf_device(device_index)
+            device = self.open_runtime_device(device_index)
             if device is None:
                 return JtagScanResult(
                     ok=False,
                     status="failed",
                     mapping=None,
                     channels=[],
-                    reason="DWF runtime could not open a device",
+                    reason="hardware runtime could not open a device",
                 )
 
-            if not self.dwf_runtime_ready():
-                self.close_dwf_device()
+            if not self.runtime_ready():
+                self.close_runtime_device()
                 return JtagScanResult(
                     ok=False,
                     status="failed",
                     mapping=None,
                     channels=[],
-                    reason="DWF runtime is not ready for JTAG scanning",
+                    reason="hardware runtime is not ready for JTAG scanning",
                 )
 
             try:
-                channels = self.get_dwf_channel_indices(
+                channels = self.get_runtime_channel_indices(
                     pin_mask_override=pin_mask_override,
                     pin_max_override=pin_max_override,
                 )
             finally:
-                self.close_dwf_device()
+                self.close_runtime_device()
 
         if not channels:
             return JtagScanResult(
@@ -456,7 +458,7 @@ class JtagScanner:
                 status="failed",
                 mapping=None,
                 channels=channels,
-                reason="No usable DWF or candidate channels were found",
+                reason="No usable backend or candidate channels were found",
             )
 
         mapping = self.find_jtag_pin_mapping(channels)
@@ -477,25 +479,18 @@ class JtagScanner:
             reason="No valid JTAG pin mapping found for the supplied channel list",
         )
 
-    def _get_dwf_root(self):
-        """Return the dwfpy root module used by legacy helpers.
-
-        Kept for internal compatibility with code expecting a dwfpy symbol.
-        """
-        return dwfpy
-
-    def _get_dwf_channel(self, pin):
+    def _get_backend_channel(self, pin):
         """Return a backend channel object for the given pin index."""
         return self.backend.get_channel(pin)
 
-    def _configure_dwf_device(self):
+    def _configure_backend_device(self):
         """Configure the backend device for JTAG scanning.
 
         Delegates to the backend implementation.
         """
         return self.backend.configure_device()
 
-    def _ensure_dwf_initialized(self):
+    def _ensure_backend_initialized(self):
         """Ensure the backend library has been initialized."""
         return self.backend.ensure_initialized()
 

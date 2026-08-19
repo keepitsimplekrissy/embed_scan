@@ -1,6 +1,6 @@
 import pytest
 
-from jtag_scanner import JtagScanner
+from features.jtag.jtag_scanner import JtagScanner
 from hardware_backend import DwfHardwareInterface, HardwareBackend
 
 
@@ -75,8 +75,8 @@ def test_run_jtag_scan_with_candidate_channels(scanner_with_dummy_backend):
     assert len(result.channels) == 4
 
 
-def test_open_close_dwf_device(scanner_with_dummy_backend):
+def test_open_close_runtime_device(scanner_with_dummy_backend):
     scanner = scanner_with_dummy_backend
-    assert scanner.open_dwf_device(0) is scanner.backend
-    scanner.close_dwf_device()
+    assert scanner.open_runtime_device(0) is scanner.backend
+    scanner.close_runtime_device()
     assert scanner.backend.runtime_ready()
