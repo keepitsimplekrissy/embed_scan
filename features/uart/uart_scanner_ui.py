@@ -17,6 +17,7 @@ class UartScannerUI(ScannerUI):
         self.capture_seconds = 1.0
         self.sample_rate_hz = 8_000_000
         self.baud_rates = list(COMMON_UART_BAUD_RATES)
+        self.capture_path: str | None = None
 
     @staticmethod
     def parse_baud_rates(baud_rates_spec: str) -> list[int]:
@@ -76,6 +77,14 @@ class UartScannerUI(ScannerUI):
         sys.stdout.write("Baud rates set to " + str(self.baud_rates) + "\n")
         sys.stdout.flush()
 
+    def set_capture_path(self):
+        sys.stdout.write("Enter capture output folder path: ")
+        sys.stdout.flush()
+        value = self.read_cli_nonempty_line()
+        self.capture_path = value if value else None
+        sys.stdout.write("Capture path set to " + str(self.capture_path) + "\n")
+        sys.stdout.flush()
+
     def run_uart_scan(self):
         if not self.pins:
             sys.stdout.write("No UART pins selected. Use 'p' to set pins first.\n")
@@ -88,6 +97,7 @@ class UartScannerUI(ScannerUI):
         sys.stdout.write("capture seconds: " + str(self.capture_seconds) + "\n")
         sys.stdout.write("sample rate hz: " + str(self.sample_rate_hz) + "\n")
         sys.stdout.write("baud rates: " + str(self.baud_rates) + "\n")
+        sys.stdout.write("capture path: " + str(self.capture_path) + "\n")
         sys.stdout.flush()
 
         report = self.scanner.capture_and_analyze(
@@ -96,9 +106,13 @@ class UartScannerUI(ScannerUI):
             sample_rate_hz=self.sample_rate_hz,
             device_index=self.device_index,
             baud_rates=tuple(self.baud_rates),
+            capture_path=self.capture_path,
         )
         sys.stdout.write("UART scan status: " + report.status + "\n")
         sys.stdout.write("reason: " + report.reason + "\n")
+        capture_storage_path = getattr(report, "capture_storage_path", None)
+        if capture_storage_path:
+            sys.stdout.write("capture data path: " + str(capture_storage_path) + "\n")
         if report.ok:
             sys.stdout.write("rx pin: " + str(report.rx_pin) + "\n")
             sys.stdout.write("flow control pin: " + str(report.flow_control_pin) + "\n")
@@ -120,6 +134,7 @@ class UartScannerUI(ScannerUI):
         sys.stdout.write(" t - set capture duration seconds\n")
         sys.stdout.write(" r - set sample rate Hz\n")
         sys.stdout.write(" b - set baud rates list\n")
+        sys.stdout.write(" o - set capture output path\n")
         sys.stdout.write(" h - print this help\n")
         sys.stdout.write(" q - quit\n")
         sys.stdout.write(title)
@@ -141,6 +156,8 @@ class UartScannerUI(ScannerUI):
                 self.set_sample_rate()
             case "b":
                 self.set_baud_rates()
+            case "o":
+                self.set_capture_path()
             case "h":
                 self.display_help()
             case "q":
@@ -174,6 +191,9 @@ class UartScannerUI(ScannerUI):
         parsed_baud_rates = self.parse_baud_rates(baud_spec)
         if parsed_baud_rates:
             self.baud_rates = parsed_baud_rates
+        capture_path = str(input_args.get("capture_path", "") or "").strip()
+        if capture_path:
+            self.capture_path = capture_path
 
     def loop(self):
         super().loop()

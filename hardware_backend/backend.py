@@ -1,3 +1,8 @@
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+
 class HardwareBackend:
     def __init__(self):
         self.error = None
@@ -43,3 +48,18 @@ class HardwareBackend:
 
     def pin_mode(self, pin, mode):
         raise NotImplementedError
+
+    def store_capture_data(self, capture_kind: str, payload: dict, capture_path: str | None = None) -> str:
+        """Persist capture payload in backend-specific storage and return its path."""
+        if capture_path:
+            storage_dir = Path(capture_path)
+        else:
+            backend_folder = (self.backend_name or "generic").strip().lower().replace(" ", "_")
+            storage_dir = Path.cwd() / "captures" / backend_folder
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        output_path = storage_dir / f"{capture_kind}_{timestamp}.json"
+        with output_path.open("w", encoding="utf-8") as output_file:
+            json.dump(payload, output_file, indent=2, sort_keys=True)
+            output_file.write("\n")
+        return str(output_path)

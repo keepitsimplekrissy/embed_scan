@@ -119,6 +119,12 @@ def parse_arguments(input_arguments):
         default="",
         help="Comma-separated UART baud rates to test",
     )
+    uart_parser.add_argument(
+        "--capture-path",
+        type=str,
+        default="",
+        help="Optional output folder path for captured UART data",
+    )
 
     status_parser = subparsers.add_parser("status", help="Read current high/low states for pins")
     status_parser.add_argument(
@@ -152,6 +158,12 @@ def parse_arguments(input_arguments):
         type=str,
         default="",
         help="Optional initial comma-separated UART baud rates",
+    )
+    ui_parser.add_argument(
+        "--capture-path",
+        type=str,
+        default="",
+        help="Optional initial UART capture output folder path",
     )
     ui_parser.add_argument(
         "--status-pins",
@@ -256,9 +268,13 @@ def main_program():
                 sample_rate_hz=int(input_args.get("sample_rate", 8_000_000)),
                 device_index=int(input_args.get("device_index", 0)),
                 baud_rates=baud_rates,
+                capture_path=str(input_args.get("capture_path", "") or "").strip() or None,
             )
             sys.stdout.write("UART scan status: " + report.status + "\n")
             sys.stdout.write("reason: " + report.reason + "\n")
+            capture_storage_path = getattr(report, "capture_storage_path", None)
+            if capture_storage_path:
+                sys.stdout.write("capture data path: " + str(capture_storage_path) + "\n")
             if report.ok:
                 sys.stdout.write("rx pin: " + str(report.rx_pin) + "\n")
                 sys.stdout.write("flow control pin: " + str(report.flow_control_pin) + "\n")

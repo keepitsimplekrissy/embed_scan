@@ -17,6 +17,7 @@ class FakeUartReport:
     parity = "none"
     valid_frames = 4
     decoded_text = "TEST"
+    capture_storage_path = "/tmp/uart-capture.json"
 
 
 class FakeUartScanner:
@@ -53,6 +54,7 @@ def test_uart_ui_setup_from_args():
             "seconds": 2.0,
             "sample_rate": 4_000_000,
             "baud_rates": "9600,115200",
+            "capture_path": "/tmp/uart-captures",
         }
     )
 
@@ -61,6 +63,7 @@ def test_uart_ui_setup_from_args():
     assert ui.capture_seconds == 2.0
     assert ui.sample_rate_hz == 4_000_000
     assert ui.baud_rates == [9600, 115200]
+    assert ui.capture_path == "/tmp/uart-captures"
 
 
 def test_uart_ui_set_pins_command(monkeypatch):
@@ -84,6 +87,7 @@ def test_uart_ui_scan_command(monkeypatch):
     ui.capture_seconds = 1.5
     ui.sample_rate_hz = 8_000_000
     ui.baud_rates = [9600, 115200]
+    ui.capture_path = "/tmp/uart-captures"
 
     ui.command_line_interface()
 
@@ -94,6 +98,7 @@ def test_uart_ui_scan_command(monkeypatch):
     assert call["sample_rate_hz"] == 8_000_000
     assert call["device_index"] == 0
     assert call["baud_rates"] == (9600, 115200)
+    assert call["capture_path"] == "/tmp/uart-captures"
 
     out = sio.get_stdout()
     assert "Starting UART scan with settings:\n" in out
@@ -102,7 +107,9 @@ def test_uart_ui_scan_command(monkeypatch):
     assert "capture seconds: 1.5\n" in out
     assert "sample rate hz: 8000000\n" in out
     assert "baud rates: [9600, 115200]\n" in out
+    assert "capture path: /tmp/uart-captures\n" in out
     assert "UART scan status: success\n" in out
+    assert "capture data path: /tmp/uart-capture.json\n" in out
     assert "rx pin: 3\n" in out
 
 
@@ -124,6 +131,18 @@ def test_uart_ui_set_time_skips_leading_newline(monkeypatch):
 
     ui.command_line_interface()
     assert ui.capture_seconds == 2.5
+
+
+def test_uart_ui_set_capture_path(monkeypatch):
+    sio = StdIOCapture(b"o/tmp/uart-captures\n")
+    sio.apply(monkeypatch)
+    scanner = FakeUartScanner()
+    ui = UartScannerUI(scanner)
+
+    ui.command_line_interface()
+
+    assert ui.capture_path == "/tmp/uart-captures"
+    assert "Capture path set to /tmp/uart-captures\n" in sio.get_stdout()
 
 
 def test_uart_ui_command_with_enter_does_not_add_extra_prompt(monkeypatch):

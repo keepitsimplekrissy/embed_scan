@@ -48,6 +48,10 @@ class DummyCaptureBackend(HardwareBackend):
         self.log.append(("capture", tuple(pins), sample_rate_hz, duration_seconds))
         return {pin: self.capture_data[pin] for pin in pins}
 
+    def store_capture_data(self, capture_kind, payload, capture_path=None):
+        self.log.append(("store_capture_data", capture_kind, payload, capture_path))
+        return "/tmp/fake-uart-capture.json"
+
 
 class DummyNoCaptureBackend(HardwareBackend):
     def __init__(self):
@@ -121,6 +125,33 @@ def test_capture_pins_uses_backend_capture_hook():
     assert ("open_device", 0) in backend.log
     assert ("capture", (3, 4), 8_000_000, 0.001) in backend.log
     assert "close_device" in backend.log
+
+
+def test_capture_and_analyze_stores_capture_payload():
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    rx_samples, _frame_ranges = _build_uart_line_samples(b"A", sample_rate_hz, baud_rate)
+    backend = DummyCaptureBackend({3: rx_samples})
+    scanner = UartScanner(backend)
+
+    report = scanner.capture_and_analyze(
+        pins=[3],
+        duration_seconds=0.001,
+        sample_rate_hz=sample_rate_hz,
+        baud_rates=(baud_rate,),
+        capture_path="/tmp/uart-out",
+    )
+
+    store_calls = [entry for entry in backend.log if isinstance(entry, tuple) and entry[0] == "store_capture_data"]
+    assert len(store_calls) == 1
+    _, capture_kind, payload, capture_path = store_calls[0]
+    assert capture_kind == "uart_capture"
+    assert capture_path == "/tmp/uart-out"
+    assert payload["backend"] == backend.backend_name
+    assert payload["pins"] == [3]
+    assert payload["sample_rate_hz"] == sample_rate_hz
+    assert 3 in payload["pin_samples"]
+    assert report.capture_storage_path == "/tmp/fake-uart-capture.json"
 
 
 def test_analyze_capture_detects_uart_and_flow_control_pin():

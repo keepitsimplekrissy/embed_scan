@@ -44,6 +44,7 @@ class UartAnalysisReport:
     decoded_bytes: bytes
     decoded_text: str
     reason: str
+    capture_storage_path: str | None = None
 
 
 class UartScanner:
@@ -123,6 +124,7 @@ class UartScanner:
         sample_rate_hz: int = 8_000_000,
         device_index: int = 0,
         baud_rates: tuple[int, ...] = COMMON_UART_BAUD_RATES,
+        capture_path: str | None = None,
     ) -> UartAnalysisReport:
         captured = self.capture_pins(
             pins=pins,
@@ -130,7 +132,21 @@ class UartScanner:
             sample_rate_hz=sample_rate_hz,
             device_index=device_index,
         )
-        return self.analyze_capture(captured, sample_rate_hz=sample_rate_hz, baud_rates=baud_rates)
+        capture_storage_path = self.backend.store_capture_data(
+            capture_kind="uart_capture",
+            payload={
+                "backend": self.backend.backend_name,
+                "device_index": int(device_index),
+                "pins": [int(pin) for pin in pins],
+                "sample_rate_hz": int(sample_rate_hz),
+                "duration_seconds": float(duration_seconds),
+                "pin_samples": captured,
+            },
+            capture_path=capture_path,
+        )
+        report = self.analyze_capture(captured, sample_rate_hz=sample_rate_hz, baud_rates=baud_rates)
+        report.capture_storage_path = capture_storage_path
+        return report
 
     def analyze_capture(
         self,
