@@ -9,6 +9,11 @@ import logging
 import argparse
 import sys
 
+try:
+    from _version import __version__
+except ImportError:
+    __version__ = "0.0.0.dev0"
+
 from features.jtag.jtag_scanner import JtagScanner
 from features.jtag.jtag_scanner_ui import JtagScannerUI
 from features.status.pin_status_scanner import PinStatusScanner

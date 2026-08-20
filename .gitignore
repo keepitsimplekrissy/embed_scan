@@ -2,6 +2,9 @@
 _Archive
 *.json
 
+# setuptools-scm generated version file
+_version.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

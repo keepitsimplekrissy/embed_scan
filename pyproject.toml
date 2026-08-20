@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=70", "setuptools-scm>=8", "pydwf>=1.2.0", "saleae>=0.12.0"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "embed-scan"
@@ -26,8 +26,10 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-all  = ["dwfpy>=1.2.0", "saleae>=0.12.0"]
-dev  = [
+dwf    = ["dwfpy>=1.2.0"]
+saleae = ["saleae>=0.12.0"]
+all    = ["dwfpy>=1.2.0", "saleae>=0.12.0"]
+dev    = [
     "pytest>=9",
     "dwfpy>=1.2.0",
     "saleae>=0.12.0",
@@ -43,23 +45,29 @@ Issues     = "https://github.com/your-org/embed-scan/issues"
 Changelog  = "https://github.com/your-org/embed-scan/blob/main/CHANGELOG.md"
 
 # ---------------------------------------------------------------------------
-# setuptools: include all Python packages and the data files
+# setuptools: include all Python packages and top-level modules
 # ---------------------------------------------------------------------------
 [tool.setuptools.packages.find]
 where   = ["."]
-include = ["embed_scan*", "features*", "hardware_backend*"]
+include = ["features*", "hardware_backend*"]
 exclude = ["tests*", "_Archive*"]
+
+# embed_scan is a single-file module, not a package
+[tool.setuptools]
+py-modules = ["embed_scan"]
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
 
 # ---------------------------------------------------------------------------
 # setuptools-scm: derive __version__ from git tags
+# Written to a standalone file imported by embed_scan.__version__
 # ---------------------------------------------------------------------------
 [tool.setuptools_scm]
-write_to = "embed_scan/_version.py"
+version_file   = "_version.py"
 version_scheme = "post-release"
 local_scheme   = "dirty-tag"
+fallback_version = "0.0.0"
 
 # ---------------------------------------------------------------------------
 # pytest
