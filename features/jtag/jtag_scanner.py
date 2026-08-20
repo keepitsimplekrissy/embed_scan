@@ -342,142 +342,204 @@ class JtagScanner:
             runtime_policy=runtime_policy,
         )
 
-    def run_jtag_scan(self, device_index=0, candidate_channels=None, pin_mask_override=None, pin_max_override=None, runtime_policy="hardware", device=None):
+    def run_jtag_scan(self, device_index=0, candidate_channels=None, pin_mask_override=None, pin_max_override=None, runtime_policy="hardware", device=None, capture_path=None):
         """Run a full JTAG scan using either hardware or simulation.
 
         Parameters mirror the public API: device_index chooses a backend device by
         index, candidate_channels may be provided to avoid querying hardware
         channel lists, and runtime_policy selects between 'hardware' and
         'simulation'. When a device object is provided it is validated and used
-        directly. Returns a JtagScanResult instance describing the outcome.
+        directly. When capture_path is provided the TDO bit stream (and all other
+        pin activity) is saved as a BSON edge-stream file alongside the scan.
+        Returns a JtagScanResult instance describing the outcome.
         """
 
         if runtime_policy not in {"hardware", "simulation"}:
             runtime_policy = "hardware"
 
-        if candidate_channels is None and device is not None:
-            device = self._resolve_runtime_device(device)
-            if device is None:
-                return JtagScanResult(
+        # Recording: accumulate per-pin bit samples for BSON export
+        _pin_samples: dict[int, list[int]] = {}
+        _recording = (runtime_policy == "hardware")
+
+        _orig_digital_read = self.digital_read
+        _orig_digital_write = self.digital_write
+
+        def _recording_read(pin):
+            level = _orig_digital_read(pin)
+            if _recording:
+                _pin_samples.setdefault(pin, []).append(int(bool(level)))
+            return level
+
+        def _recording_write(pin, value):
+            result = _orig_digital_write(pin, value)
+            if _recording:
+                _pin_samples.setdefault(pin, []).append(int(bool(value)))
+            return result
+
+        if _recording:
+            self.digital_read = _recording_read
+            self.digital_write = _recording_write
+
+        result = None
+        try:
+            if candidate_channels is None and device is not None:
+                device = self._resolve_runtime_device(device)
+                if device is None:
+                    result = JtagScanResult(
+                        ok=False,
+                        status="failed",
+                        mapping=None,
+                        channels=[],
+                        reason="caller supplied a device object that was not accepted by the backend",
+                    )
+                    return result
+
+            if candidate_channels is not None:
+                channels = self._coerce_candidate_list(candidate_channels)
+                if runtime_policy == "simulation":
+                    mapping = self.simulate_jtag_pin_mapping(channels)
+                    if mapping:
+                        result = JtagScanResult(
+                            ok=True,
+                            status="simulation",
+                            mapping=mapping,
+                            channels=channels,
+                            reason="simulation mapping synthesized from candidate channels",
+                        )
+                        return result
+                    result = JtagScanResult(
+                        ok=False,
+                        status="failed",
+                        mapping=None,
+                        channels=channels,
+                        reason="simulation mode could not synthesize a mapping from the supplied candidate list",
+                    )
+                    return result
+            elif runtime_policy == "simulation":
+                result = JtagScanResult(
                     ok=False,
                     status="failed",
                     mapping=None,
                     channels=[],
-                    reason="caller supplied a device object that was not accepted by the backend",
+                    reason="simulation mode requested without a candidate list",
                 )
-
-        if candidate_channels is not None:
-            channels = self._coerce_candidate_list(candidate_channels)
-            if runtime_policy == "simulation":
-                mapping = self.simulate_jtag_pin_mapping(channels)
-                if mapping:
-                    return JtagScanResult(
-                        ok=True,
-                        status="simulation",
-                        mapping=mapping,
-                        channels=channels,
-                        reason="simulation mapping synthesized from candidate channels",
+                return result
+            elif device is not None:
+                device = self._resolve_runtime_device(device)
+                if device is None:
+                    result = JtagScanResult(
+                        ok=False,
+                        status="failed",
+                        mapping=None,
+                        channels=[],
+                        reason="caller device object was not accepted by the backend",
                     )
-                return JtagScanResult(
+                    return result
+
+                self._runtime_device = device
+                self._runtime_connected = getattr(device, "is_open", False)
+                if not self._runtime_connected:
+                    result = JtagScanResult(
+                        ok=False,
+                        status="failed",
+                        mapping=None,
+                        channels=[],
+                        reason="caller device object is not open",
+                    )
+                    return result
+
+                try:
+                    channels = self.get_runtime_channel_indices(
+                        pin_mask_override=pin_mask_override,
+                        pin_max_override=pin_max_override,
+                    )
+                finally:
+                    self._runtime_device = None
+                    self._runtime_connected = False
+            else:
+                device = self.open_runtime_device(device_index)
+                if device is None:
+                    result = JtagScanResult(
+                        ok=False,
+                        status="failed",
+                        mapping=None,
+                        channels=[],
+                        reason="hardware runtime could not open a device",
+                    )
+                    return result
+
+                if not self.runtime_ready():
+                    self.close_runtime_device()
+                    result = JtagScanResult(
+                        ok=False,
+                        status="failed",
+                        mapping=None,
+                        channels=[],
+                        reason="hardware runtime is not ready for JTAG scanning",
+                    )
+                    return result
+
+                try:
+                    channels = self.get_runtime_channel_indices(
+                        pin_mask_override=pin_mask_override,
+                        pin_max_override=pin_max_override,
+                    )
+                finally:
+                    self.close_runtime_device()
+
+            if not channels:
+                result = JtagScanResult(
                     ok=False,
                     status="failed",
                     mapping=None,
                     channels=channels,
-                    reason="simulation mode could not synthesize a mapping from the supplied candidate list",
+                    reason="No usable backend or candidate channels were found",
                 )
-        elif runtime_policy == "simulation":
-            return JtagScanResult(
-                ok=False,
-                status="failed",
-                mapping=None,
-                channels=[],
-                reason="simulation mode requested without a candidate list",
-            )
-        elif device is not None:
-            device = self._resolve_runtime_device(device)
-            if device is None:
-                return JtagScanResult(
-                    ok=False,
-                    status="failed",
-                    mapping=None,
-                    channels=[],
-                    reason="caller device object was not accepted by the backend",
-                )
+                return result
 
-            self._runtime_device = device
-            self._runtime_connected = getattr(device, "is_open", False)
-            if not self._runtime_connected:
-                return JtagScanResult(
-                    ok=False,
-                    status="failed",
-                    mapping=None,
-                    channels=[],
-                    reason="caller device object is not open",
+            mapping = self.find_jtag_pin_mapping(channels)
+            if mapping:
+                result = JtagScanResult(
+                    ok=True,
+                    status="success",
+                    mapping=mapping,
+                    channels=channels,
+                    reason="JTAG mapping found",
                 )
+                return result
 
-            try:
-                channels = self.get_runtime_channel_indices(
-                    pin_mask_override=pin_mask_override,
-                    pin_max_override=pin_max_override,
-                )
-            finally:
-                self._runtime_device = None
-                self._runtime_connected = False
-        else:
-            device = self.open_runtime_device(device_index)
-            if device is None:
-                return JtagScanResult(
-                    ok=False,
-                    status="failed",
-                    mapping=None,
-                    channels=[],
-                    reason="hardware runtime could not open a device",
-                )
-
-            if not self.runtime_ready():
-                self.close_runtime_device()
-                return JtagScanResult(
-                    ok=False,
-                    status="failed",
-                    mapping=None,
-                    channels=[],
-                    reason="hardware runtime is not ready for JTAG scanning",
-                )
-
-            try:
-                channels = self.get_runtime_channel_indices(
-                    pin_mask_override=pin_mask_override,
-                    pin_max_override=pin_max_override,
-                )
-            finally:
-                self.close_runtime_device()
-
-        if not channels:
-            return JtagScanResult(
+            result = JtagScanResult(
                 ok=False,
                 status="failed",
                 mapping=None,
                 channels=channels,
-                reason="No usable backend or candidate channels were found",
+                reason="No valid JTAG pin mapping found for the supplied channel list",
             )
+            return result
 
-        mapping = self.find_jtag_pin_mapping(channels)
-        if mapping:
-            return JtagScanResult(
-                ok=True,
-                status="success",
-                mapping=mapping,
-                channels=channels,
-                reason="JTAG mapping found",
-            )
+        finally:
+            # Restore original I/O methods regardless of outcome
+            if _recording:
+                self.digital_read = _orig_digital_read
+                self.digital_write = _orig_digital_write
 
-        return JtagScanResult(
-            ok=False,
-            status="failed",
-            mapping=None,
-            channels=channels,
-            reason="No valid JTAG pin mapping found for the supplied channel list",
-        )
+            # Save BSON edge-stream capture when pin activity was recorded
+            if _recording and _pin_samples:
+                try:
+                    self.backend.store_capture_data(
+                        capture_kind="jtag_scan",
+                        payload={
+                            "backend": self.backend.backend_name,
+                            "device_index": int(device_index),
+                            "pin_samples": _pin_samples,
+                            "sample_rate_hz": max(
+                                1, int(1_000_000 // max(1, self.clock_half_cycle_us))
+                            ),
+                        },
+                        capture_path=capture_path,
+                    )
+                except Exception:
+                    pass  # capture write is best-effort
 
     def _get_backend_channel(self, pin):
         """Return a backend channel object for the given pin index."""

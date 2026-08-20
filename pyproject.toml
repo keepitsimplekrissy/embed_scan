@@ -28,11 +28,12 @@ dependencies = []
 [project.optional-dependencies]
 dwf    = ["dwfpy>=1.2.0"]
 saleae = ["saleae>=0.12.0"]
-all    = ["dwfpy>=1.2.0", "saleae>=0.12.0"]
+all    = ["dwfpy>=1.2.0", "saleae>=0.12.0", "pymongo>=4.0"]
 dev    = [
     "pytest>=9",
     "dwfpy>=1.2.0",
     "saleae>=0.12.0",
+    "pymongo>=4.0",
 ]
 
 [project.scripts]

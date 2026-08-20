@@ -112,7 +112,10 @@ class UartScannerUI(ScannerUI):
         sys.stdout.write("reason: " + report.reason + "\n")
         capture_storage_path = getattr(report, "capture_storage_path", None)
         if capture_storage_path:
-            sys.stdout.write("capture data path: " + str(capture_storage_path) + "\n")
+            sys.stdout.write("capture data path (JSON): " + str(capture_storage_path) + "\n")
+        capture_bson_path = getattr(report, "capture_bson_path", None)
+        if capture_bson_path:
+            sys.stdout.write("capture data path (BSON): " + str(capture_bson_path) + "\n")
         if report.ok:
             channels = getattr(report, "channels", [])
             if len(channels) > 1:

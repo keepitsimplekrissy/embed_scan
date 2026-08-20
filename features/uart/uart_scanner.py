@@ -1,6 +1,7 @@
 import math
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from hardware_backend import DwfHardwareInterface, HardwareBackend
 
@@ -71,21 +72,24 @@ class UartAnalysisReport:
     code that only inspects a single result still works without changes.
 
     Attributes:
-        ok:                   True when at least one channel decoded valid frames.
-        status:               Short status string ("success" or "failed").
-        channels:             All decoded configurations, best-first.
-        rx_pin:               Best channel's RX pin (None on failure).
-        flow_control_pin:     Flow-control pin associated with the best channel.
-        baud_rate:            Best channel's baud rate.
-        data_bits:            Best channel's data bits.
-        stop_bits:            Best channel's stop bits.
-        parity:               Best channel's parity.
-        valid_frames:         Best channel's frame count.
-        decoded_bytes:        Best channel's decoded bytes.
-        decoded_text:         Best channel's decoded text.
-        inverted:             True when best channel's signal is polarity-inverted.
-        reason:               Human-readable summary.
-        capture_storage_path: Path where the raw capture was written.
+        ok:                     True when at least one channel decoded valid frames.
+        status:                 Short status string ("success" or "failed").
+        channels:               All decoded configurations, best-first.
+        rx_pin:                 Best channel's RX pin (None on failure).
+        flow_control_pin:       Flow-control pin associated with the best channel.
+        baud_rate:              Best channel's baud rate.
+        data_bits:              Best channel's data bits.
+        stop_bits:              Best channel's stop bits.
+        parity:                 Best channel's parity.
+        valid_frames:           Best channel's frame count.
+        decoded_bytes:          Best channel's decoded bytes.
+        decoded_text:           Best channel's decoded text.
+        inverted:               True when best channel's signal is polarity-inverted.
+        reason:                 Human-readable summary.
+        capture_storage_path:   Path to the full flat-sample JSON file.
+        capture_bson_path:      Path to the compact BSON edge-stream file (same
+                                stem as capture_storage_path with .bson extension),
+                                or None when BSON was not written.
     """
     ok: bool
     status: str
@@ -102,6 +106,7 @@ class UartAnalysisReport:
     reason: str
     inverted: bool = False
     capture_storage_path: str | None = None
+    capture_bson_path: str | None = None
 
 
 class UartScanner:
@@ -201,8 +206,16 @@ class UartScanner:
             },
             capture_path=capture_path,
         )
+        # The backend writes a BSON edge-stream alongside the JSON (same stem).
+        capture_bson_path: str | None = None
+        if capture_storage_path:
+            bson_candidate = Path(capture_storage_path).with_suffix(".bson")
+            if bson_candidate.exists():
+                capture_bson_path = str(bson_candidate)
+
         report = self.analyze_capture(captured, sample_rate_hz=sample_rate_hz, baud_rates=baud_rates)
         report.capture_storage_path = capture_storage_path
+        report.capture_bson_path = capture_bson_path
         return report
 
     @staticmethod
