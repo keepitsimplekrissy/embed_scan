@@ -114,12 +114,30 @@ class UartScannerUI(ScannerUI):
         if capture_storage_path:
             sys.stdout.write("capture data path: " + str(capture_storage_path) + "\n")
         if report.ok:
+            channels = getattr(report, "channels", [])
+            if len(channels) > 1:
+                sys.stdout.write(
+                    "+--- All detected UART configurations ("
+                    + str(len(channels)) + ") ---+\n"
+                )
+                for idx, ch in enumerate(channels):
+                    sys.stdout.write(
+                        "  [" + str(idx + 1) + "] pin=" + str(ch.rx_pin)
+                        + " baud=" + str(ch.baud_rate)
+                        + " " + str(ch.data_bits) + str(ch.parity[0].upper()) + str(ch.stop_bits)
+                        + (" INV" if ch.inverted else "")
+                        + " frames=" + str(ch.valid_frames)
+                        + " text=" + repr(ch.decoded_text)
+                        + "\n"
+                    )
+                sys.stdout.write("+--- Best result ---+\n")
             sys.stdout.write("rx pin: " + str(report.rx_pin) + "\n")
             sys.stdout.write("flow control pin: " + str(report.flow_control_pin) + "\n")
             sys.stdout.write("baud rate: " + str(report.baud_rate) + "\n")
             sys.stdout.write("data bits: " + str(report.data_bits) + "\n")
             sys.stdout.write("stop bits: " + str(report.stop_bits) + "\n")
             sys.stdout.write("parity: " + str(report.parity) + "\n")
+            sys.stdout.write("signal inverted: " + str(getattr(report, "inverted", False)) + "\n")
             sys.stdout.write("valid frames: " + str(report.valid_frames) + "\n")
             sys.stdout.write("decoded text: " + report.decoded_text + "\n")
         sys.stdout.flush()

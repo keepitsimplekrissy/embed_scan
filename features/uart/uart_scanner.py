@@ -1,6 +1,6 @@
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from hardware_backend import DwfHardwareInterface, HardwareBackend
 
@@ -31,9 +31,65 @@ MAX_ANALYSIS_SAMPLES = 250_000
 
 
 @dataclass
+class UartChannelResult:
+    """Decoded UART configuration found on a single pin.
+
+    Each entry in UartAnalysisReport.channels represents one pin/configuration
+    combination that produced valid frames from the captured data.
+
+    Attributes:
+        rx_pin:        Pin index the data was received on.
+        baud_rate:     Detected baud rate in bits per second.
+        data_bits:     Number of data bits per frame (7 or 8).
+        stop_bits:     Number of stop bits per frame (1 or 2).
+        parity:        Parity mode: "none", "even", or "odd".
+        inverted:      True when the signal idles LOW (polarity inverted).
+        valid_frames:  Number of valid frames decoded.
+        decoded_bytes: Raw bytes decoded from the frames.
+        decoded_text:  decoded_bytes interpreted as ASCII (replacement for non-printable).
+        score:         Internal confidence score used to rank candidates.
+    """
+    rx_pin: int
+    baud_rate: int
+    data_bits: int
+    stop_bits: int
+    parity: str
+    inverted: bool
+    valid_frames: int
+    decoded_bytes: bytes
+    decoded_text: str
+    score: float
+
+
+@dataclass
 class UartAnalysisReport:
+    """Result of a full UART capture analysis.
+
+    The ``channels`` list contains every pin/configuration combination that
+    successfully decoded frames, ordered by descending confidence score.  The
+    top-level fields mirror the best (highest-scoring) channel so that existing
+    code that only inspects a single result still works without changes.
+
+    Attributes:
+        ok:                   True when at least one channel decoded valid frames.
+        status:               Short status string ("success" or "failed").
+        channels:             All decoded configurations, best-first.
+        rx_pin:               Best channel's RX pin (None on failure).
+        flow_control_pin:     Flow-control pin associated with the best channel.
+        baud_rate:            Best channel's baud rate.
+        data_bits:            Best channel's data bits.
+        stop_bits:            Best channel's stop bits.
+        parity:               Best channel's parity.
+        valid_frames:         Best channel's frame count.
+        decoded_bytes:        Best channel's decoded bytes.
+        decoded_text:         Best channel's decoded text.
+        inverted:             True when best channel's signal is polarity-inverted.
+        reason:               Human-readable summary.
+        capture_storage_path: Path where the raw capture was written.
+    """
     ok: bool
     status: str
+    channels: list[UartChannelResult]
     rx_pin: int | None
     flow_control_pin: int | None
     baud_rate: int | None
@@ -44,6 +100,7 @@ class UartAnalysisReport:
     decoded_bytes: bytes
     decoded_text: str
     reason: str
+    inverted: bool = False
     capture_storage_path: str | None = None
 
 
@@ -148,6 +205,18 @@ class UartScanner:
         report.capture_storage_path = capture_storage_path
         return report
 
+    @staticmethod
+    def _is_inverted(samples: list[int]) -> bool:
+        """Return True when the signal appears to be inverted (idles LOW).
+
+        Normal UART idles HIGH. When the dominant level is LOW (more zeros than
+        ones) the signal is almost certainly inverted — e.g. connected via an
+        RS-232 driver, a MAX232, or a logic-level converter that inverts polarity.
+        """
+        if not samples:
+            return False
+        return samples.count(0) > samples.count(1)
+
     def analyze_capture(
         self,
         pin_samples: dict[int, list[int]],
@@ -158,6 +227,7 @@ class UartScanner:
             return UartAnalysisReport(
                 ok=False,
                 status="failed",
+                channels=[],
                 rx_pin=None,
                 flow_control_pin=None,
                 baud_rate=None,
@@ -180,7 +250,6 @@ class UartScanner:
             }
             sample_rate_hz = max(1, int(round(sample_rate_hz / decimation_step)))
 
-        best_result = None
         frame_configs = (
             (8, "none", 1),
             (8, "even", 1),
@@ -191,48 +260,78 @@ class UartScanner:
             (8, "none", 2),
         )
 
+        # Collect every (pin, config, polarity) combination that decodes frames.
+        # Key: (pin, baud_rate, data_bits, parity, stop_bits, inverted) to
+        # deduplicate when both polarities happen to decode the same config.
+        seen: set[tuple] = set()
+        all_candidates: list[tuple] = []
+
         for pin, samples in pin_samples.items():
             if not samples:
                 continue
-            for baud_rate in baud_rates:
-                for data_bits, parity, stop_bits in frame_configs:
-                    decoded = self._decode_uart_stream(
-                        samples=samples,
-                        sample_rate_hz=sample_rate_hz,
-                        baud_rate=baud_rate,
-                        data_bits=data_bits,
-                        parity=parity,
-                        stop_bits=stop_bits,
-                    )
-                    if decoded is None:
-                        continue
-                    valid_frames, decoded_bytes, frame_ranges = decoded
-                    if valid_frames == 0:
-                        continue
 
-                    printable_count = sum(1 for byte in decoded_bytes if byte in (9, 10, 13) or 32 <= byte <= 126)
-                    printable_ratio = printable_count / max(1, len(decoded_bytes))
-                    samples_per_bit = sample_rate_hz / float(baud_rate)
-                    timing_weight = max(0.25, min(4.0, samples_per_bit / 16.0))
-                    score = (valid_frames * timing_weight) + printable_ratio
-                    candidate = (
-                        score,
-                        pin,
-                        baud_rate,
-                        data_bits,
-                        parity,
-                        stop_bits,
-                        valid_frames,
-                        decoded_bytes,
-                        frame_ranges,
-                    )
-                    if best_result is None or candidate[0] > best_result[0]:
-                        best_result = candidate
+            inverted_flag = self._is_inverted(samples)
+            # Preferred polarity listed first so it wins on equal scores
+            if inverted_flag:
+                polarities: list[tuple[bool, list[int]]] = [
+                    (True, [1 - s for s in samples]),
+                    (False, samples),
+                ]
+            else:
+                polarities = [
+                    (False, samples),
+                    (True, [1 - s for s in samples]),
+                ]
 
-        if best_result is None:
+            for is_inverted, effective_samples in polarities:
+                for baud_rate in baud_rates:
+                    for data_bits, parity, stop_bits in frame_configs:
+                        decoded = self._decode_uart_stream(
+                            samples=effective_samples,
+                            sample_rate_hz=sample_rate_hz,
+                            baud_rate=baud_rate,
+                            data_bits=data_bits,
+                            parity=parity,
+                            stop_bits=stop_bits,
+                        )
+                        if decoded is None:
+                            continue
+                        valid_frames, decoded_bytes, frame_ranges = decoded
+                        if valid_frames == 0:
+                            continue
+
+                        dedup_key = (pin, baud_rate, data_bits, parity, stop_bits, is_inverted)
+                        if dedup_key in seen:
+                            continue
+                        seen.add(dedup_key)
+
+                        printable_count = sum(
+                            1 for byte in decoded_bytes
+                            if byte in (9, 10, 13) or 32 <= byte <= 126
+                        )
+                        printable_ratio = printable_count / max(1, len(decoded_bytes))
+                        samples_per_bit = sample_rate_hz / float(baud_rate)
+                        timing_weight = max(0.25, min(4.0, samples_per_bit / 16.0))
+                        score = (valid_frames * timing_weight) + printable_ratio
+
+                        all_candidates.append((
+                            score,
+                            pin,
+                            baud_rate,
+                            data_bits,
+                            parity,
+                            stop_bits,
+                            valid_frames,
+                            decoded_bytes,
+                            frame_ranges,
+                            is_inverted,
+                        ))
+
+        if not all_candidates:
             return UartAnalysisReport(
                 ok=False,
                 status="failed",
+                channels=[],
                 rx_pin=None,
                 flow_control_pin=None,
                 baud_rate=None,
@@ -245,6 +344,29 @@ class UartScanner:
                 reason="no valid UART framing found in captured data",
             )
 
+        # Sort all candidates best-first
+        all_candidates.sort(key=lambda c: c[0], reverse=True)
+
+        # Build UartChannelResult list — all unique configurations
+        channels: list[UartChannelResult] = []
+        for (
+            score, pin, baud_rate, data_bits, parity, stop_bits,
+            valid_frames, decoded_bytes, _frame_ranges, is_inverted,
+        ) in all_candidates:
+            channels.append(UartChannelResult(
+                rx_pin=pin,
+                baud_rate=baud_rate,
+                data_bits=data_bits,
+                stop_bits=stop_bits,
+                parity=parity,
+                inverted=is_inverted,
+                valid_frames=valid_frames,
+                decoded_bytes=bytes(decoded_bytes),
+                decoded_text=bytes(decoded_bytes).decode("ascii", errors="replace"),
+                score=score,
+            ))
+
+        # Best candidate drives the top-level report fields
         (
             _score,
             rx_pin,
@@ -254,13 +376,28 @@ class UartScanner:
             stop_bits,
             valid_frames,
             decoded_bytes,
-            frame_ranges,
-        ) = best_result
-        flow_pin = self._find_flow_control_pin(rx_pin, frame_ranges, pin_samples)
+            best_frame_ranges,
+            result_inverted,
+        ) = all_candidates[0]
+
+        # Use the same polarity for flow-control detection as was used for RX
+        if result_inverted:
+            flow_samples = {p: [1 - s for s in samps] for p, samps in pin_samples.items()}
+        else:
+            flow_samples = pin_samples
+        flow_pin = self._find_flow_control_pin(rx_pin, best_frame_ranges, flow_samples)
+
+        reason = (
+            f"{len(channels)} UART configuration(s) found across "
+            f"{len({c.rx_pin for c in channels})} pin(s)"
+        )
+        if result_inverted:
+            reason += " (best channel: signal polarity inverted — idle-LOW detected)"
 
         return UartAnalysisReport(
             ok=True,
             status="success",
+            channels=channels,
             rx_pin=rx_pin,
             flow_control_pin=flow_pin,
             baud_rate=baud_rate,
@@ -270,7 +407,8 @@ class UartScanner:
             valid_frames=valid_frames,
             decoded_bytes=bytes(decoded_bytes),
             decoded_text=bytes(decoded_bytes).decode("ascii", errors="replace"),
-            reason="UART parameters inferred from sampled pin activity",
+            reason=reason,
+            inverted=result_inverted,
         )
 
     def _decode_uart_stream(

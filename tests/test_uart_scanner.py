@@ -190,3 +190,195 @@ def test_capture_pins_fallback_is_time_bounded():
     assert len(captured[1]) > 0
     assert len(captured[1]) <= 250_000
     assert "close_device" in backend.log
+
+
+# ---------------------------------------------------------------------------
+# Inverted-polarity (idle-LOW) detection tests
+# ---------------------------------------------------------------------------
+
+def _invert_samples(samples: list[int]) -> list[int]:
+    return [1 - s for s in samples]
+
+
+def test_is_inverted_returns_true_for_mostly_low():
+    from features.uart.uart_scanner import UartScanner
+    scanner = UartScanner.__new__(UartScanner)
+    assert UartScanner._is_inverted([0] * 900 + [1] * 100) is True
+
+
+def test_is_inverted_returns_false_for_mostly_high():
+    assert UartScanner._is_inverted([1] * 900 + [0] * 100) is False
+
+
+def test_analyze_capture_detects_inverted_signal():
+    """Analyzer must decode UART data when the signal idles LOW (inverted)."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    normal_samples, _ranges = _build_uart_line_samples(b"A", sample_rate_hz, baud_rate)
+    inverted_samples = _invert_samples(normal_samples)
+
+    backend = DummyCaptureBackend({7: inverted_samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({7: inverted_samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    assert report.ok is True
+    assert report.inverted is True
+    assert report.decoded_bytes == b"A"
+    assert report.rx_pin == 7
+    assert "inverted" in report.reason.lower()
+
+
+def test_analyze_capture_normal_signal_not_flagged_inverted():
+    """Normal idle-HIGH signal must not be flagged as inverted."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    normal_samples, _ranges = _build_uart_line_samples(b"A", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({3: normal_samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({3: normal_samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    assert report.ok is True
+    assert report.inverted is False
+    assert report.decoded_bytes == b"A"
+
+
+def test_analyze_capture_inverted_multi_byte():
+    """Multi-byte inverted stream must decode correctly."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    payload = b"Hi"
+    normal_samples, _ranges = _build_uart_line_samples(payload, sample_rate_hz, baud_rate)
+    inverted_samples = _invert_samples(normal_samples)
+
+    backend = DummyCaptureBackend({4: inverted_samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({4: inverted_samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    assert report.ok is True
+    assert report.inverted is True
+    assert report.decoded_bytes == payload
+
+
+# ---------------------------------------------------------------------------
+# Multi-channel / multi-configuration tests
+# ---------------------------------------------------------------------------
+
+from features.uart.uart_scanner import UartChannelResult
+
+
+def test_analyze_capture_returns_channels_list():
+    """Report.channels must be populated with at least the best result."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    samples, _ = _build_uart_line_samples(b"A", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({3: samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({3: samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    assert report.ok is True
+    assert isinstance(report.channels, list)
+    assert len(report.channels) >= 1
+    best = report.channels[0]
+    assert isinstance(best, UartChannelResult)
+    assert best.rx_pin == 3
+    assert best.baud_rate == baud_rate
+    assert best.decoded_bytes == b"A"
+
+
+def test_analyze_capture_channels_sorted_by_score_descending():
+    """channels list must be sorted best-first (descending score)."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    # Use a multi-byte payload so the best baud rate is clearly distinct
+    samples, _ = _build_uart_line_samples(b"Hello", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({1: samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({1: samples}, sample_rate_hz=sample_rate_hz)
+
+    scores = [ch.score for ch in report.channels]
+    assert scores == sorted(scores, reverse=True), "channels must be best-first"
+
+
+def test_analyze_capture_multi_pin_each_pin_in_channels():
+    """When multiple pins carry data, each should appear in channels."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    samples_a, _ = _build_uart_line_samples(b"A", sample_rate_hz, baud_rate)
+    samples_b, _ = _build_uart_line_samples(b"B", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({2: samples_a, 3: samples_b})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture(
+        {2: samples_a, 3: samples_b},
+        sample_rate_hz=sample_rate_hz,
+        baud_rates=(baud_rate,),
+    )
+
+    assert report.ok is True
+    pins_found = {ch.rx_pin for ch in report.channels}
+    assert 2 in pins_found
+    assert 3 in pins_found
+
+
+def test_analyze_capture_no_duplicate_configurations():
+    """channels must not contain the same (pin, baud, config, polarity) twice."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    samples, _ = _build_uart_line_samples(b"X", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({5: samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({5: samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    seen = set()
+    for ch in report.channels:
+        key = (ch.rx_pin, ch.baud_rate, ch.data_bits, ch.parity, ch.stop_bits, ch.inverted)
+        assert key not in seen, f"Duplicate channel configuration: {key}"
+        seen.add(key)
+
+
+def test_analyze_capture_channels_report_reason_contains_count():
+    """reason string must mention the number of configurations found."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    samples, _ = _build_uart_line_samples(b"Z", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({0: samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({0: samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    assert report.ok is True
+    assert str(len(report.channels)) in report.reason
+
+
+def test_channel_result_fields_are_correct_types():
+    """UartChannelResult fields must have the right types."""
+    sample_rate_hz = 8_000_000
+    baud_rate = 115200
+    samples, _ = _build_uart_line_samples(b"T", sample_rate_hz, baud_rate)
+
+    backend = DummyCaptureBackend({1: samples})
+    scanner = UartScanner(backend)
+    report = scanner.analyze_capture({1: samples}, sample_rate_hz=sample_rate_hz,
+                                     baud_rates=(baud_rate,))
+
+    ch = report.channels[0]
+    assert isinstance(ch.rx_pin, int)
+    assert isinstance(ch.baud_rate, int)
+    assert isinstance(ch.data_bits, int)
+    assert isinstance(ch.stop_bits, int)
+    assert isinstance(ch.parity, str)
+    assert isinstance(ch.inverted, bool)
+    assert isinstance(ch.valid_frames, int)
+    assert isinstance(ch.decoded_bytes, bytes)
+    assert isinstance(ch.decoded_text, str)
+    assert isinstance(ch.score, float)
