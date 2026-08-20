@@ -39,10 +39,10 @@ dev    = [
 embed-scan = "embed_scan:main_program"
 
 [project.urls]
-Homepage   = "https://github.com/your-org/embed-scan"
-Repository = "https://github.com/your-org/embed-scan"
-Issues     = "https://github.com/your-org/embed-scan/issues"
-Changelog  = "https://github.com/your-org/embed-scan/blob/main/CHANGELOG.md"
+Homepage   = "https://github.com/keepitsimplekrissy/embed-scan"
+Repository = "https://github.com/keepitsimplekrissy/embed-scan"
+Issues     = "https://github.com/keepitsimplekrissy/embed-scan/issues"
+Changelog  = "https://github.com/keepitsimplekrissy/embed-scan/blob/main/CHANGELOG.md"
 
 # ---------------------------------------------------------------------------
 # setuptools: include all Python packages and top-level modules
