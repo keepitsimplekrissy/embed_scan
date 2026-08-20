@@ -40,11 +40,14 @@ jobs:
 
   # -------------------------------------------------------------------------
   # Build source distribution + wheel
+  # Only runs on push events (branches and tags); skipped on pull_request.
   # -------------------------------------------------------------------------
   build:
     name: Build distribution
     needs: test
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4
@@ -56,15 +59,13 @@ jobs:
           python-version: "3.13"
 
       - name: Install build tools
-        run: pip install build
+        run: pip install build twine
 
       - name: Build sdist and wheel
         run: python -m build
 
       - name: Verify distributions
-        run: |
-          pip install twine
-          twine check dist/*
+        run: twine check dist/*
 
       - name: Upload dist artefacts
         uses: actions/upload-artifact@v4
@@ -75,6 +76,14 @@ jobs:
 
   # -------------------------------------------------------------------------
   # Publish to PyPI — only on a v*.*.* tag push
+  #
+  # Prerequisites (one-time setup on PyPI):
+  #   1. Go to https://pypi.org/manage/account/publishing/
+  #   2. Add a new trusted publisher:
+  #        Owner:        <your-github-org-or-username>
+  #        Repository:   embed-scan
+  #        Workflow:     publish.yml
+  #        Environment:  pypi
   # -------------------------------------------------------------------------
   publish:
     name: Publish to PyPI
@@ -98,3 +107,64 @@ jobs:
 
       - name: Publish to PyPI (trusted publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # -------------------------------------------------------------------------
+  # Create a GitHub Release after a successful PyPI publish.
+  # Attaches the sdist and wheel, and uses the CHANGELOG section for the
+  # matching version as the release body.
+  # -------------------------------------------------------------------------
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write   # required to create releases and upload assets
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download dist artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract changelog section for this version
+        id: changelog
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"   # strip leading 'v' from tag
+          # Extract the block between ## [VERSION] and the next ## heading.
+          # Falls back to a generic message when no matching section is found.
+          NOTES=$(awk \
+            -v ver="$VERSION" \
+            'BEGIN { found=0 }
+             /^## \[/ {
+               if (found) exit
+               if ($0 ~ "\\[" ver "\\]") found=1
+               next
+             }
+             found { print }' \
+            CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${GITHUB_REF_NAME} — see [CHANGELOG](CHANGELOG.md) for details."
+          fi
+          # Write to a file to safely pass multi-line content to subsequent steps
+          echo "$NOTES" > release_notes.md
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "embed-scan ${{ github.ref_name }}"
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

@@ -13,3 +13,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Interactive selector UI combining all scanner modes
 - Digilent DWF and Saleae hardware backends
 - `embed-scan` CLI entrypoint
+
+<!-- When releasing, rename [Unreleased] to [X.Y.Z] and add a new [Unreleased] section above. Example:
+
+## [1.0.0] - 2026-08-20
+
+### Added
+- Initial release
+-->
