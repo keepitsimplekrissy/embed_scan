@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=70", "setuptools-scm>=8", "pydwf>=1.2.0", "saleae>=0.12.0"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "embed-scan"
+dynamic = ["version"]
+description = "CLI toolkit for scanning and identifying embedded hardware interfaces (JTAG, UART, pin status) via Digilent and Saleae backends"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["jtag", "uart", "embedded", "hardware", "digilent", "saleae", "scan"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Hardware",
+]
+dependencies = []
+
+[project.optional-dependencies]
+all  = ["dwfpy>=1.2.0", "saleae>=0.12.0"]
+dev  = [
+    "pytest>=9",
+    "dwfpy>=1.2.0",
+    "saleae>=0.12.0",
+]
+
+[project.scripts]
+embed-scan = "embed_scan:main_program"
+
+[project.urls]
+Homepage   = "https://github.com/your-org/embed-scan"
+Repository = "https://github.com/your-org/embed-scan"
+Issues     = "https://github.com/your-org/embed-scan/issues"
+Changelog  = "https://github.com/your-org/embed-scan/blob/main/CHANGELOG.md"
+
+# ---------------------------------------------------------------------------
+# setuptools: include all Python packages and the data files
+# ---------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["embed_scan*", "features*", "hardware_backend*"]
+exclude = ["tests*", "_Archive*"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+
+# ---------------------------------------------------------------------------
+# setuptools-scm: derive __version__ from git tags
+# ---------------------------------------------------------------------------
+[tool.setuptools_scm]
+write_to = "embed_scan/_version.py"
+version_scheme = "post-release"
+local_scheme   = "dirty-tag"
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
